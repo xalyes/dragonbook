@@ -7,7 +7,7 @@
 int installID();
 int installNum();
 
-std::map<int, std::string> symbols;
+std::map<size_t, std::pair<std::string, std::optional<SemanticValue>>> symbols;
 
 %}
 
@@ -40,10 +40,10 @@ yylval.idIdx = (int) installID(); return (ID);
 int installID()
 {
     std::string id(yytext, yyleng);
-    const auto it = std::find_if(symbols.begin(), symbols.end(), [&](const auto& item) { return item.second == id; });
+    const auto it = std::find_if(symbols.begin(), symbols.end(), [&](const auto& item) { return item.second.first == id; });
     if (it == symbols.end())
     {
-        symbols.insert({symbols.size() + 1, id});
+        symbols.insert({symbols.size() + 1, { id, std::nullopt }});
         return symbols.size();
     }
     else

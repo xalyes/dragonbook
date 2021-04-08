@@ -16,9 +16,10 @@ void yyerror(const char *str) {}
 #include <iostream>
 #include <tuple>
 #include <vector>
+#include <regex>
 
 extern FILE* yyin;
-std::vector<std::pair<std::string, size_t>>* result;
+SemanticValue* result;
 
 %}
 
@@ -26,7 +27,7 @@ std::vector<std::pair<std::string, size_t>>* result;
 {
     size_t size;
     size_t idIdx;
-    std::vector<std::pair<std::string, size_t>>* semVal;
+    SemanticValue* semVal;
 }
 
 %token<idIdx> ID
@@ -46,7 +47,7 @@ std::vector<std::pair<std::string, size_t>>* result;
 defs : type ID SEMICOLON defs
        {
             size_t sz = 0;
-            const auto id = symbols.at($<idIdx>2);
+            const auto id = symbols.at($<idIdx>2).first;
             if (($<semVal>1->size() == 1) && ($<semVal>1->front().first.empty()))
             {
                 sz = $<semVal>1->front().second;
@@ -83,13 +84,52 @@ defs : type ID SEMICOLON defs
             }
        }
      | { $<semVal>$ = nullptr; }
-     | CLASS ID L_BRACE defs R_BRACE
+     | CLASS ID L_BRACE defs R_BRACE SEMICOLON defs
+       {
+           auto& pair = symbols.at($<idIdx>2);
+
+           for (auto it = result->begin(); it != result->end(); )
+           {
+               if (it->first.find("<" + pair.first + ">") != std::string::npos)
+               {
+                   std::vector<std::pair<std::string, size_t>> newItems;
+                   
+                   for (auto& i : *$<semVal>4)
+                   {
+                       newItems.push_back({ std::regex_replace(it->first, std::regex("<" + pair.first + ">"), i.first), i.second});
+                   }
+
+                   it = result->insert(it, newItems.begin(), newItems.end());
+                   std::advance(it, newItems.size());
+                   it = result->erase(it);
+               }
+               else
+               {
+                   it++;
+               }
+           }
+
+           $<semVal>$ = result;
+       }
      ;
 
 type : base comp 
      {
-         auto stackVec = new std::vector<std::pair<std::string, size_t>>{ { "", $<size>1*$<size>2 } };
-         $<semVal>$ = stackVec;
+         auto& base = *$<semVal>1;
+         if (base.size() == 1)
+         {
+             base[0].second *= $<size>2;
+         }
+         else
+         {
+             auto i = $<size>2;
+             while (i > 1)
+             {
+                 i--;
+                 base.insert(base.end(), base.begin(), base.end());
+             }
+         }
+         $<semVal>$ = $<semVal>1;
      }
      | RECORD L_BRACE defs R_BRACE
      {
@@ -98,11 +138,19 @@ type : base comp
      ;
 
 base : INT
-     {
-         $<size>$ = 8;
-     }
-     | FLOAT { $<size>$ = 4; }
+        {
+            $<semVal>$ = new std::vector<std::pair<std::string, size_t>>{ { "", 8 } };
+        }
+     | FLOAT
+        {
+            $<semVal>$ = new std::vector<std::pair<std::string, size_t>>{ { "", 4 } };
+        }
      | ID
+         {
+             auto& pair = symbols.at($<idIdx>1);
+
+             $<semVal>$ = new std::vector<std::pair<std::string, size_t>>{ { "<" + pair.first + ">", 0 } };
+         }
      ;
 
 comp : /* empty */ { $<size>$ = 1; }
