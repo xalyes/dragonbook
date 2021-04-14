@@ -13,60 +13,6 @@
 #include <Poco/StringTokenizer.h>
 #include <Poco/NumberParser.h>
 
-/*
-
-S -> S + E
-   | E.
-E -> E * F
-   | F.
-F -> a ID | b ID
-   | ( S ).
-ID -> a ID | b ID | .
-
-
-*/
-
-/*
-enum class Terminal : uint8_t
-{
-    _EOF,
-    B,
-    A,
-    LEFT,
-    RIGHT,
-    MUL,
-    PLUS
-};
-
-Terminal ToTerminal(const Token& token)
-{
-    if (token == "")
-        return Terminal::_EOF;
-    if (token == "b")
-        return Terminal::B;
-    if (token == "a")
-        return Terminal::A;
-    if (token == "(")
-        return Terminal::LEFT;
-    if (token == ")")
-        return Terminal::RIGHT;
-    if (token == "*")
-        return Terminal::MUL;
-    if (token == "+")
-        return Terminal::PLUS;
-
-    throw std::invalid_argument("ToTerminal failed. Argument: " + token);
-}
-
-enum class NonTerminal : uint8_t
-{
-    S = static_cast<uint8_t>(Terminal::PLUS) + 1,
-    E,
-    F,
-    ID
-};
-*/
-
 using SymbolTable = std::set<std::string>;
 
 using Token = std::pair<std::string, SymbolTable::iterator>;
@@ -82,6 +28,11 @@ struct GrammarSymbol
             return (isNonTerminal < rhs.isNonTerminal);
         else
             return str < rhs.str;
+    }
+
+    bool operator ==(const GrammarSymbol& rhs) const
+    {
+        return (str == rhs.str) && (isNonTerminal == rhs.isNonTerminal);
     }
 };
 
@@ -106,58 +57,98 @@ struct Accept {};
 using Action = std::variant<Shift, Reduce, Accept>;
 using LalrTable = std::map<std::pair<State, GrammarSymbol>, Action>;
 
-/*
-LalrTable T = {
-    {{0, Terminal::B}, Shift{6}}, {{0, Terminal::A}, Shift{5}}, {{0, Terminal::LEFT}, Shift{4}}, {{0, NonTerminal::S}, Shift{3}}, {{0, NonTerminal::E}, Shift{2}}, {{0, NonTerminal::F}, Shift{1}},
-    {{1, Terminal::_EOF}, Reduce{NonTerminal::E, {NonTerminal::F}}}, {{1, Terminal::RIGHT}, Reduce{NonTerminal::E, {NonTerminal::F}}}, {{1, Terminal::MUL}, Reduce{NonTerminal::E, {NonTerminal::F}}}, {{1, Terminal::PLUS}, Reduce{NonTerminal::E, {NonTerminal::F}}},
-    {{2, Terminal::_EOF}, Reduce{NonTerminal::S, {NonTerminal::E}}}, {{2, Terminal::RIGHT}, Reduce{NonTerminal::S, {NonTerminal::E}}}, {{2, Terminal::MUL}, Shift{13}}, {{2, Terminal::PLUS}, Reduce{NonTerminal::S, {NonTerminal::E}}},
-    {{3, Terminal::_EOF}, Accept{}}, {{3, Terminal::PLUS}, Shift{12}},
-    {{4, Terminal::B}, Shift{6}}, {{4, Terminal::A}, Shift{5}}, {{4, Terminal::LEFT}, Shift{4}}, {{4, NonTerminal::S}, Shift{11}}, {{4, NonTerminal::E}, Shift{2}}, {{4, NonTerminal::F}, Shift{1}},
-    {{5, Terminal::_EOF}, Reduce{NonTerminal::ID, {}}}, {{5, Terminal::B}, Shift{10}}, {{5, Terminal::A}, Shift{9}}, {{5, Terminal::RIGHT}, Reduce{NonTerminal::ID, {}}}, {{5, Terminal::MUL}, Reduce{NonTerminal::ID, {}}}, {{5, Terminal::PLUS}, Reduce{NonTerminal::ID, {}}}, {{5, NonTerminal::ID}, Shift{8}},
-    {{6, Terminal::_EOF}, Reduce{NonTerminal::ID, {}}}, {{6, Terminal::B}, Shift{10}}, {{6, Terminal::A}, Shift{9}}, {{6, Terminal::RIGHT}, Reduce{NonTerminal::ID, {}}}, {{6, Terminal::MUL}, Reduce{NonTerminal::ID, {}}}, {{6, Terminal::PLUS}, Reduce{NonTerminal::ID, {}}}, {{6, NonTerminal::ID}, Shift{7}},
-    {{7, Terminal::_EOF}, Reduce{NonTerminal::F, {Terminal::B, NonTerminal::ID}}}, {{7, Terminal::RIGHT}, Reduce{NonTerminal::F, {Terminal::B, NonTerminal::ID}}}, {{7, Terminal::MUL}, Reduce{NonTerminal::F, {Terminal::B, NonTerminal::ID}}}, {{7, Terminal::PLUS}, Reduce{NonTerminal::F, {Terminal::B, NonTerminal::ID}}},
-    {{8, Terminal::_EOF}, Reduce{NonTerminal::F, {Terminal::A, NonTerminal::ID}}}, {{8, Terminal::RIGHT}, Reduce{NonTerminal::F, {Terminal::A, NonTerminal::ID}}}, {{8, Terminal::MUL}, Reduce{NonTerminal::F, {Terminal::A, NonTerminal::ID}}}, {{8, Terminal::PLUS}, Reduce{NonTerminal::F, {Terminal::A, NonTerminal::ID}}},
-    {{9, Terminal::_EOF}, Reduce{NonTerminal::ID, {}}}, {{9, Terminal::B}, Shift{10}}, {{9, Terminal::A}, Shift{9}}, {{9, Terminal::RIGHT}, Reduce{NonTerminal::ID, {}}}, {{9, Terminal::MUL}, Reduce{NonTerminal::ID, {}}}, {{9, Terminal::PLUS}, Reduce{NonTerminal::ID, {}}}, {{9, NonTerminal::ID}, Shift{18}},
-    {{10, Terminal::_EOF}, Reduce{NonTerminal::ID, {}}}, {{10, Terminal::B}, Shift{10}}, {{10, Terminal::A}, Shift{9}}, {{10, Terminal::RIGHT}, Reduce{NonTerminal::ID, {}}}, {{10, Terminal::MUL}, Reduce{NonTerminal::ID, {}}}, {{10, Terminal::PLUS}, Reduce{NonTerminal::ID, {}}}, {{10, NonTerminal::ID}, Shift{17}},
-    {{11, Terminal::RIGHT}, Shift{16}}, {{11, Terminal::PLUS}, Shift{12}},
-    {{12, Terminal::B}, Shift{6}}, {{12, Terminal::A}, Shift{5}}, {{12, Terminal::LEFT}, Shift{4}}, {{12, NonTerminal::E}, Shift{15}}, {{12, NonTerminal::F}, Shift{1}},
-    {{13, Terminal::B}, Shift{6}}, {{13, Terminal::A}, Shift{5}}, {{13, Terminal::LEFT}, Shift{4}}, {{13, NonTerminal::F}, Shift{14}},
-    {{14, Terminal::_EOF}, Reduce{NonTerminal::E, {NonTerminal::E, Terminal::MUL, NonTerminal::F}}}, {{14, Terminal::RIGHT}, Reduce{NonTerminal::E, {NonTerminal::E, Terminal::MUL, NonTerminal::F}}}, {{14, Terminal::MUL}, Reduce{NonTerminal::E, {NonTerminal::E, Terminal::MUL, NonTerminal::F}}}, {{14, Terminal::PLUS}, Reduce{NonTerminal::E, {NonTerminal::E, Terminal::MUL, NonTerminal::F}}},
-    {{15, Terminal::_EOF}, Reduce{NonTerminal::S, {NonTerminal::S, Terminal::PLUS, NonTerminal::E}}}, {{15, Terminal::RIGHT}, Reduce{NonTerminal::S, {NonTerminal::S, Terminal::PLUS, NonTerminal::E}}}, {{15, Terminal::MUL}, Shift{13}}, {{15, Terminal::PLUS}, Reduce{NonTerminal::S, {NonTerminal::S, Terminal::PLUS, NonTerminal::E}}},
-    {{16, Terminal::_EOF}, Reduce{NonTerminal::F, {Terminal::LEFT, NonTerminal::S, Terminal::RIGHT}}}, {{16, Terminal::RIGHT}, Reduce{NonTerminal::F, {Terminal::LEFT, NonTerminal::S, Terminal::RIGHT}}}, {{16, Terminal::MUL}, Reduce{NonTerminal::F, {Terminal::LEFT, NonTerminal::S, Terminal::RIGHT}}}, {{16, Terminal::PLUS}, Reduce{NonTerminal::F, {Terminal::LEFT, NonTerminal::S, Terminal::RIGHT}}},
-    {{17, Terminal::_EOF}, Reduce{NonTerminal::ID, {Terminal::B, NonTerminal::ID}}}, {{17, Terminal::RIGHT}, Reduce{NonTerminal::ID, {Terminal::B, NonTerminal::ID}}}, {{17, Terminal::MUL}, Reduce{NonTerminal::ID, {Terminal::B, NonTerminal::ID}}}, {{17, Terminal::PLUS}, Reduce{NonTerminal::ID, {Terminal::B, NonTerminal::ID}}},
-    {{18, Terminal::_EOF}, Reduce{NonTerminal::ID, {Terminal::A, NonTerminal::ID}}}, {{18, Terminal::RIGHT}, Reduce{NonTerminal::ID, {Terminal::A, NonTerminal::ID}}}, {{18, Terminal::MUL}, Reduce{NonTerminal::ID, {Terminal::A, NonTerminal::ID}}}, {{18, Terminal::PLUS}, Reduce{NonTerminal::ID, {Terminal::A, NonTerminal::ID}}}
+struct Code
+{
+    std::string result;
+    std::string lines;
 };
-*/
 
 struct Annotation
 {
-    std::string str;
-    bool mustEnclose = false;
+    Annotation() {}
+    Annotation(const Token& t)
+    {
+        token = t;
+        isToken = true;
+    }
+
+    bool isToken{ false };
+
+    Code code;
+    Token token;
 };
 
 using AnnotatedState = std::pair<State, Annotation>;
 
-void DoTranslate(const std::vector<AnnotatedState>& oldStates, AnnotatedState& newState)
+static std::string GenerateTempVar()
 {
-    if ((oldStates.size() == 3) && (oldStates[1].second.str == "+"))
-    {
-        newState.second.mustEnclose = true;
-    }
+    static size_t num = 0;
+    return "t" + std::to_string(num++);
+}
 
-    if ((oldStates.size() == 3) && (oldStates[0].second.str == "(") && (oldStates[2].second.str == ")") && (!oldStates[1].second.mustEnclose))
+void ReduceHandler(const Reduce& reduce, std::vector<AnnotatedState>&& oldStates, SymbolTable& symbols, AnnotatedState& newState)
+{
+    // 0. S -> id = E ;
+    if (reduce.to == std::vector<GrammarSymbol>{ { false, "id" }, { false, "=" }, { true, "E" }, { false, ";" } })
     {
-        newState.second.str = oldStates[1].second.str;
-        newState.second.mustEnclose = false;
-        return;
+        newState.second.code.lines = oldStates[2].second.code.lines
+            + *(oldStates[0].second.token.second) + " = " + oldStates[2].second.code.result + "\n";
+        newState.second.code.result = *(oldStates[0].second.token.second);
     }
-
-    std::stringstream acc;
-    for (const auto& os : oldStates)
+    // 1. E -> E * E
+    if (reduce.to == std::vector<GrammarSymbol>{ { true, "E" }, { false, "*" }, { true, "E" } })
     {
-        acc << os.second.str;
+        const std::string temp = GenerateTempVar();
+        newState.second.code.lines = oldStates[0].second.code.lines + oldStates[2].second.code.lines
+            + temp + " = " + oldStates[0].second.code.result + " * " + oldStates[2].second.code.result + "\n";
+        newState.second.code.result = temp;
+        symbols.insert(temp);
     }
-    newState.second.str = acc.str();
+    // 2. E -> E / E
+    if (reduce.to == std::vector<GrammarSymbol>{ { true, "E" }, { false, "/" }, { true, "E" } })
+    {
+        const std::string temp = GenerateTempVar();
+        newState.second.code.lines = oldStates[0].second.code.lines + oldStates[2].second.code.lines
+            + temp + " = " + oldStates[0].second.code.result + " / " + oldStates[2].second.code.result + "\n";
+        newState.second.code.result = temp;
+        symbols.insert(temp);
+    }
+    // 3. E -> E + E
+    if (reduce.to == std::vector<GrammarSymbol>{ { true, "E" }, { false, "+" }, { true, "E" } })
+    {
+        const std::string temp = GenerateTempVar();
+        newState.second.code.lines = oldStates[0].second.code.lines + oldStates[2].second.code.lines
+            + temp + " = " + oldStates[0].second.code.result + " + " + oldStates[2].second.code.result + "\n";
+        newState.second.code.result = temp;
+        symbols.insert(temp);
+    }
+    // 4. E -> E - E
+    if (reduce.to == std::vector<GrammarSymbol>{ { true, "E" }, { false, "-" }, { true, "E" } })
+    {
+        const std::string temp = GenerateTempVar();
+        newState.second.code.lines = oldStates[0].second.code.lines + oldStates[2].second.code.lines
+            + temp + " = " + oldStates[0].second.code.result + " - " + oldStates[2].second.code.result + "\n";
+        newState.second.code.result = temp;
+        symbols.insert(temp);
+    }
+    // 5. E -> - E
+    if (reduce.to == std::vector<GrammarSymbol>{ { false, "-" }, { true, "E" } })
+    {
+        const std::string temp = GenerateTempVar();
+        newState.second.code.lines = oldStates[1].second.code.lines + temp + " = 0 - " + oldStates[1].second.code.result + "\n";
+        newState.second.code.result = temp;
+        symbols.insert(temp);
+    }
+    // 6. E -> ( E )
+    if (reduce.to == std::vector<GrammarSymbol>{ { false, "(" }, { true, "E" } , { false, ")" } })
+    {
+        newState.second.code = oldStates[1].second.code;
+    }
+    // 7. E -> id
+    if (reduce.to == std::vector<GrammarSymbol>{ { false, "id" } })
+    {
+        newState.second.code.result = *(oldStates[0].second.token.second);
+    }
 }
 
 class LrAnalyzer
@@ -168,11 +159,11 @@ public:
         , m_input(input)
         , m_symbols(symbols)
     {
-        m_states.push({ 0, { "", false } });
+        m_states.push({ 0, Annotation{} });
         m_input.push({ "", m_symbols.end() });
     }
 
-    std::string Analyze()
+    Annotation Analyze()
     {
         while (true)
         {
@@ -190,7 +181,7 @@ public:
 
                     if constexpr (std::is_same_v<T, Shift>) 
                     {
-                        m_states.push({ arg.st, { m_input.front().first, false } });
+                        m_states.push({ arg.st, Annotation{ m_input.front() } });
                         m_input.pop();
                     }
                     else if constexpr (std::is_same_v<T, Reduce>)
@@ -208,8 +199,8 @@ public:
                             throw std::runtime_error("Syntax error. State: " + std::to_string(m_states.top().first) + ". Current non terminal: " + arg.from.nonTerm);
 
                         const auto shift = std::get<Shift>(gotoIt->second);
-                        m_states.push({ shift.st, { "", false } });
-                        DoTranslate(states, m_states.top());
+                        m_states.push({ shift.st, Annotation{} });
+                        ReduceHandler(arg, std::move(states), m_symbols, m_states.top());
                     }
                     else if constexpr (std::is_same_v<T, Accept>)
                     {
@@ -223,7 +214,7 @@ public:
 
             if (accepted)
             {
-                return m_states.top().second.str;
+                return m_states.top().second;
             }
         }
     }
@@ -251,7 +242,10 @@ LalrTable ParseGrammarFile()
         {
             if (terms)
             {
-                termsAndNonTerms.push_back(GrammarSymbol{ false, token });
+                if (token != "$")
+                    termsAndNonTerms.push_back(GrammarSymbol{ false, token });
+                else
+                    termsAndNonTerms.push_back(GrammarSymbol{ false, "" });
             }
             else
             {
@@ -332,17 +326,21 @@ LalrTable ParseGrammarFile()
                     const auto action = Shift{ stateInt };
                     table.insert({ { State{num}, termsAndNonTerms[counter - 1] }, action });
                 }
-
-                if (token.front() == 'r')
+                else if (token.front() == 'r')
                 {
                     const auto reduceInt = Poco::NumberParser::parseUnsigned(token.substr(1));
                     const auto action = reduces[reduceInt];
                     table.insert({ { State{num}, termsAndNonTerms[counter - 1] }, action });
                 }
-
-                if (token == "acc")
+                else if (token == "acc")
                 {
                     table.insert({ { State{num}, termsAndNonTerms[counter - 1] }, Accept{} });
+                }
+                else if (!token.empty())
+                {
+                    const auto stateInt = Poco::NumberParser::parseUnsigned(token);
+                    const auto action = Shift{ stateInt };
+                    table.insert({ { State{num}, termsAndNonTerms[counter - 1] }, action });
                 }
             }
             num++;
@@ -369,7 +367,7 @@ std::queue<Token> Tokenize(SymbolTable& symbolTable, std::string&& input)
         }
         else if (std::regex_search(input, match, op, std::regex_constants::match_continuous))
         {
-            tokens.push({ match.str(), symbolTable.end() });
+            tokens.push({ match.str(), SymbolTable::iterator() });
         }
         else
         {
@@ -401,7 +399,7 @@ int main()
 
     try
     {
-        std::cout << l.Analyze();
+        std::cout << l.Analyze().code.lines;
     }
     catch (const std::exception& e)
     {
