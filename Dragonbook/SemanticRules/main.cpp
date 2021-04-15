@@ -13,9 +13,10 @@
 #include <Poco/StringTokenizer.h>
 #include <Poco/NumberParser.h>
 
-using SymbolTable = std::set<std::string>;
+using Type = std::pair<std::string, size_t>;
+using SymbolTable = std::map<std::string, Type>;
 
-using Token = std::pair<std::string, SymbolTable::iterator>;
+using Token = std::pair<std::string, std::string>;
 
 struct GrammarSymbol
 {
@@ -63,6 +64,13 @@ struct Code
     std::string lines;
 };
 
+struct Array
+{
+    std::string name;
+    size_t dimensional{0};
+    std::string lines;
+};
+
 struct Annotation
 {
     Annotation() {}
@@ -74,6 +82,7 @@ struct Annotation
 
     bool isToken{ false };
 
+    Array arr;
     Code code;
     Token token;
 };
@@ -88,56 +97,58 @@ static std::string GenerateTempVar()
 
 void ReduceHandler(const Reduce& reduce, std::vector<AnnotatedState>&& oldStates, SymbolTable& symbols, AnnotatedState& newState)
 {
+    const auto binaryOp = [&](const std::string& opName)
+    {
+        const Code lhsCode = oldStates[0].second.code;
+        const Code rhsCode = oldStates[2].second.code;
+
+        const std::string temp = GenerateTempVar();
+        symbols.insert({ temp, { "int", 8 } });
+
+        newState.second.code.result = temp;
+        newState.second.code.lines = lhsCode.lines + rhsCode.lines
+            + temp + " = " + lhsCode.result + " " + opName + " " + rhsCode.result + "\n";
+    };
+
     // 0. S -> id = E ;
     if (reduce.to == std::vector<GrammarSymbol>{ { false, "id" }, { false, "=" }, { true, "E" }, { false, ";" } })
     {
-        newState.second.code.lines = oldStates[2].second.code.lines
-            + *(oldStates[0].second.token.second) + " = " + oldStates[2].second.code.result + "\n";
-        newState.second.code.result = *(oldStates[0].second.token.second);
+        const auto varName = oldStates[0].second.token.second;
+        const Code oldCode = oldStates[2].second.code;
+
+        newState.second.code.result = varName;
+        newState.second.code.lines = oldCode.lines
+            + varName + " = " + oldCode.result + "\n";
     }
     // 1. E -> E * E
     if (reduce.to == std::vector<GrammarSymbol>{ { true, "E" }, { false, "*" }, { true, "E" } })
     {
-        const std::string temp = GenerateTempVar();
-        newState.second.code.lines = oldStates[0].second.code.lines + oldStates[2].second.code.lines
-            + temp + " = " + oldStates[0].second.code.result + " * " + oldStates[2].second.code.result + "\n";
-        newState.second.code.result = temp;
-        symbols.insert(temp);
+        binaryOp("*");
     }
     // 2. E -> E / E
     if (reduce.to == std::vector<GrammarSymbol>{ { true, "E" }, { false, "/" }, { true, "E" } })
     {
-        const std::string temp = GenerateTempVar();
-        newState.second.code.lines = oldStates[0].second.code.lines + oldStates[2].second.code.lines
-            + temp + " = " + oldStates[0].second.code.result + " / " + oldStates[2].second.code.result + "\n";
-        newState.second.code.result = temp;
-        symbols.insert(temp);
+        binaryOp("/");
     }
     // 3. E -> E + E
     if (reduce.to == std::vector<GrammarSymbol>{ { true, "E" }, { false, "+" }, { true, "E" } })
     {
-        const std::string temp = GenerateTempVar();
-        newState.second.code.lines = oldStates[0].second.code.lines + oldStates[2].second.code.lines
-            + temp + " = " + oldStates[0].second.code.result + " + " + oldStates[2].second.code.result + "\n";
-        newState.second.code.result = temp;
-        symbols.insert(temp);
+        binaryOp("+");
     }
     // 4. E -> E - E
     if (reduce.to == std::vector<GrammarSymbol>{ { true, "E" }, { false, "-" }, { true, "E" } })
     {
-        const std::string temp = GenerateTempVar();
-        newState.second.code.lines = oldStates[0].second.code.lines + oldStates[2].second.code.lines
-            + temp + " = " + oldStates[0].second.code.result + " - " + oldStates[2].second.code.result + "\n";
-        newState.second.code.result = temp;
-        symbols.insert(temp);
+        binaryOp("-");
     }
     // 5. E -> - E
     if (reduce.to == std::vector<GrammarSymbol>{ { false, "-" }, { true, "E" } })
     {
+        const Code oldCode = oldStates[1].second.code;
+
         const std::string temp = GenerateTempVar();
-        newState.second.code.lines = oldStates[1].second.code.lines + temp + " = 0 - " + oldStates[1].second.code.result + "\n";
+        symbols.insert({ temp, { "int", 8 } });
+        newState.second.code.lines = oldCode.lines + temp + " = 0 - " + oldCode.result + "\n";
         newState.second.code.result = temp;
-        symbols.insert(temp);
     }
     // 6. E -> ( E )
     if (reduce.to == std::vector<GrammarSymbol>{ { false, "(" }, { true, "E" } , { false, ")" } })
@@ -147,8 +158,37 @@ void ReduceHandler(const Reduce& reduce, std::vector<AnnotatedState>&& oldStates
     // 7. E -> id
     if (reduce.to == std::vector<GrammarSymbol>{ { false, "id" } })
     {
-        newState.second.code.result = *(oldStates[0].second.token.second);
+        newState.second.code.result = oldStates[0].second.token.second;
     }
+    // 8. S -> L = E ;
+    // 9. E -> L
+    if (reduce.to == std::vector<GrammarSymbol>{ { true, "E" }, { true, "L" } })
+    {
+        const auto varName = oldStates[1].second.code.arrayName;
+        const std::string temp = GenerateTempVar();
+        symbols.insert({ temp, symbols.at(varName + "[]") });
+
+        newState.second.code.result = temp;
+        newState.second.code.lines = oldCode.lines + newCode
+            + temp + " = " + varName + " [" + offset + "]\n";
+    }
+    // 10. L -> id [ E ]
+    if (reduce.to == std::vector<GrammarSymbol>{ { false, "id" }, { false, "[" }, { true, "E" }, { false, "]" } })
+    {
+        const Code oldCode = oldStates[2].second.code;
+        const auto varName = oldStates[0].second.token.second;
+        const auto varSize = symbols.at(varName + "[]").second;
+
+        const std::string offset = GenerateTempVar();
+        symbols.insert(offset, {"size_t", 64});
+
+        const std::string newCode = offset + " = " + oldCode.result + " * " + std::to_string(varSize) + "\n";
+
+        newState.second.arr.dimensional = 1;
+        newState.second.arr.name = varName;
+        newState.second.arr.lines = oldCode.lines + newCode;
+    }
+    // 11. L->L[E]
 }
 
 class LrAnalyzer
@@ -160,7 +200,7 @@ public:
         , m_symbols(symbols)
     {
         m_states.push({ 0, Annotation{} });
-        m_input.push({ "", m_symbols.end() });
+        m_input.push(Token{});
     }
 
     Annotation Analyze()
@@ -356,18 +396,20 @@ std::queue<Token> Tokenize(SymbolTable& symbolTable, std::string&& input)
     std::regex op(R"(=|;|\+|-|\*|\/|\(|\))");
     std::regex empty("[ \t]+");
 
+    Type t{ "int", 8 };
+
     std::queue<Token> tokens;
     while (!input.empty())
     {
         std::smatch match;
         if (std::regex_search(input, match, id, std::regex_constants::match_continuous))
         {
-            auto it = symbolTable.insert(match.str()).first;
-            tokens.push({ "id", it });
+            symbolTable.insert({ match.str(), t });
+            tokens.push({ "id", match.str() });
         }
         else if (std::regex_search(input, match, op, std::regex_constants::match_continuous))
         {
-            tokens.push({ match.str(), SymbolTable::iterator() });
+            tokens.push({ match.str(), "" });
         }
         else
         {
