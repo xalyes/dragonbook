@@ -5,6 +5,7 @@
 #include <variant>
 #include <iostream>
 #include <sstream>
+#include <algorithm>
 #include <stack>
 #include <fstream>
 #include <regex>
@@ -67,7 +68,7 @@ struct Code
 struct Array
 {
     std::string name;
-    size_t dimensional{0};
+    std::vector<std::string> indexes;
     std::string lines;
 };
 
@@ -108,6 +109,65 @@ void ReduceHandler(const Reduce& reduce, std::vector<AnnotatedState>&& oldStates
         newState.second.code.result = temp;
         newState.second.code.lines = lhsCode.lines + rhsCode.lines
             + temp + " = " + lhsCode.result + " " + opName + " " + rhsCode.result + "\n";
+    };
+
+    const auto parseArray = [&symbols](const Array& arr)
+    {
+        std::string arrTypeName = arr.name;
+        std::string newCode;
+        std::queue<std::string> vars;
+
+        std::vector<std::string> indexes = arr.indexes;
+        std::reverse(indexes.begin(), indexes.end());
+        
+        for (const auto& idx : indexes)
+        {
+            const auto varSize = symbols.at(arrTypeName).second;
+
+            const std::string offset = GenerateTempVar();
+            symbols.insert({ offset, { "size_t", 64 } });
+
+            newCode += (offset + " = " + idx + " * " + std::to_string(varSize) + "\n");
+            vars.push(offset);
+            arrTypeName += "[]";
+        }
+
+        std::string newResult;
+        if (vars.size() > 1)
+        {
+            const std::string temp = GenerateTempVar();
+            const auto t1 = vars.front();
+            vars.pop();
+            const auto t2 = vars.front();
+            vars.pop();
+
+            symbols.insert({ t1, { "size_t", 64 } });
+            symbols.insert({ t2, { "size_t", 64 } });
+
+            newCode += (temp + " = " + t1 + " + " + t2 + "\n");
+            newResult = temp;
+
+            while (!vars.empty())
+            {
+                const std::string nextTemp = GenerateTempVar();
+                symbols.insert({ nextTemp, { "size_t", 64 } });
+
+                newCode += (nextTemp + " = " + newResult + " + " + vars.front() + "\n");
+                vars.pop();
+                newResult = nextTemp;
+            }
+        }
+        else
+        {
+            newResult = vars.front();
+        }
+
+
+        const std::string temp = GenerateTempVar();
+        symbols.insert({ temp, symbols.at(arrTypeName) });
+
+        return std::pair<std::string, std::string>{ temp, arr.lines + newCode
+            + temp + " = " + arr.name + " [" + newResult + "]\n" };
     };
 
     // 0. S -> id = E ;
@@ -161,34 +221,44 @@ void ReduceHandler(const Reduce& reduce, std::vector<AnnotatedState>&& oldStates
         newState.second.code.result = oldStates[0].second.token.second;
     }
     // 8. S -> L = E ;
-    // 9. E -> L
-    if (reduce.to == std::vector<GrammarSymbol>{ { true, "E" }, { true, "L" } })
+    if (reduce.to == std::vector<GrammarSymbol>{ { true, "L" }, { false, "=" }, { true, "E" }, { false, ";" } })
     {
-        const auto varName = oldStates[1].second.code.arrayName;
-        const std::string temp = GenerateTempVar();
-        symbols.insert({ temp, symbols.at(varName + "[]") });
+        const auto arr = parseArray(oldStates[0].second.arr);
 
-        newState.second.code.result = temp;
-        newState.second.code.lines = oldCode.lines + newCode
-            + temp + " = " + varName + " [" + offset + "]\n";
+        const Code oldCode = oldStates[2].second.code;
+
+        newState.second.code.result = arr.first;
+        newState.second.code.lines = oldCode.lines + arr.second
+            + arr.first + " = " + oldCode.result + "\n";
+    }
+    // 9. E -> L
+    if (reduce.to == std::vector<GrammarSymbol>{ { true, "L" } })
+    {
+        const auto res = parseArray(oldStates[0].second.arr);
+        newState.second.code.result = res.first;
+        newState.second.code.lines = res.second;
     }
     // 10. L -> id [ E ]
     if (reduce.to == std::vector<GrammarSymbol>{ { false, "id" }, { false, "[" }, { true, "E" }, { false, "]" } })
     {
         const Code oldCode = oldStates[2].second.code;
         const auto varName = oldStates[0].second.token.second;
-        const auto varSize = symbols.at(varName + "[]").second;
 
-        const std::string offset = GenerateTempVar();
-        symbols.insert(offset, {"size_t", 64});
-
-        const std::string newCode = offset + " = " + oldCode.result + " * " + std::to_string(varSize) + "\n";
-
-        newState.second.arr.dimensional = 1;
         newState.second.arr.name = varName;
-        newState.second.arr.lines = oldCode.lines + newCode;
+        newState.second.arr.lines = oldCode.lines;
+        newState.second.arr.indexes.push_back(oldCode.result);
     }
     // 11. L->L[E]
+    if (reduce.to == std::vector<GrammarSymbol>{ { true, "L" }, { false, "[" }, { true, "E" }, { false, "]" } })
+    {
+        const Code oldCode = oldStates[2].second.code;
+        const auto arr = oldStates[0].second.arr;
+
+        newState.second.arr.name = arr.name;
+        newState.second.arr.lines = arr.lines + oldCode.lines;
+        newState.second.arr.indexes = arr.indexes;
+        newState.second.arr.indexes.push_back(oldCode.result);
+    }
 }
 
 class LrAnalyzer
@@ -393,7 +463,7 @@ LalrTable ParseGrammarFile()
 std::queue<Token> Tokenize(SymbolTable& symbolTable, std::string&& input)
 {
     std::regex id("[a-zA-Z0-9]+");
-    std::regex op(R"(=|;|\+|-|\*|\/|\(|\))");
+    std::regex op(R"(\[|\]|=|;|\+|-|\*|\/|\(|\))");
     std::regex empty("[ \t]+");
 
     Type t{ "int", 8 };
@@ -416,7 +486,7 @@ std::queue<Token> Tokenize(SymbolTable& symbolTable, std::string&& input)
             std::regex_search(input, match, empty, std::regex_constants::match_continuous);
         }
 
-        if (!match.ready())
+        if (match.empty())
             throw std::runtime_error("Lexical error: permitted characters found.");
 
         input = input.substr(match.str().size());
@@ -435,7 +505,20 @@ int main()
     std::getline(std::cin, input);
 
     SymbolTable symbolTable;
-    std::queue<Token> tokens = Tokenize(symbolTable, std::move(input));
+    std::queue<Token> tokens;
+    try
+    {
+        tokens = Tokenize(symbolTable, std::move(input));
+    }
+    catch (const std::exception& e)
+    {
+        std::cout << e.what() << std::endl;
+        return 1;
+    }
+
+    symbolTable.insert({ "arr", {"int[]", 3 * 3 * 8} });
+    symbolTable.insert({ "arr[]", {"int[]", 3 * 8} });
+    symbolTable.insert({ "arr[][]", {"int[]", 8} });
 
     LrAnalyzer l{ table, tokens, symbolTable };
 
@@ -446,6 +529,7 @@ int main()
     catch (const std::exception& e)
     {
         std::cout << e.what() << std::endl;
+        return 2;
     }
 
     return 0;
