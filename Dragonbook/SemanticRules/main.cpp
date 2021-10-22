@@ -462,9 +462,11 @@ LalrTable ParseGrammarFile()
 
 std::queue<Token> Tokenize(SymbolTable& symbolTable, std::string&& input)
 {
-    std::regex id("[a-zA-Z0-9]+");
-    std::regex op(R"(\[|\]|=|;|\+|-|\*|\/|\(|\))");
+    std::regex id("[a-zA-Z][a-zA-Z0-9]*");
+    std::regex op(R"(\}|\{|\[|\]|=|;|\+|-|\*|\/|\(|\))");
     std::regex empty("[ \t]+");
+    std::regex num("[0-9]+");
+    std::regex keyword("record|int|float");
 
     Type t{ "int", 8 };
 
@@ -474,8 +476,16 @@ std::queue<Token> Tokenize(SymbolTable& symbolTable, std::string&& input)
         std::smatch match;
         if (std::regex_search(input, match, id, std::regex_constants::match_continuous))
         {
+            tokens.push({ match.str(), "" });
+        }
+        else if (std::regex_search(input, match, id, std::regex_constants::match_continuous))
+        {
             symbolTable.insert({ match.str(), t });
             tokens.push({ "id", match.str() });
+        }
+        else if (std::regex_search(input, match, op, std::regex_constants::match_continuous))
+        {
+            tokens.push({ "num", match.str() });
         }
         else if (std::regex_search(input, match, op, std::regex_constants::match_continuous))
         {
