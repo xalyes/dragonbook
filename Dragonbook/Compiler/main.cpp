@@ -93,12 +93,6 @@ struct Annotation
 
 using AnnotatedState = std::pair<State, Annotation>;
 
-static std::string GenerateTempVar()
-{
-    static size_t num = 0;
-    return "t" + std::to_string(num++);
-}
-
 static size_t GetSizeOf(const std::string& basicType)
 {
     if (basicType == "int")
@@ -353,10 +347,9 @@ void ReduceHandler(const Reduce& reduce, std::vector<AnnotatedState>&& oldStates
 class LrAnalyzer
 {
 public:
-    LrAnalyzer(const LalrTable& table, const std::queue<Token>& input, const SymbolTable& symbols)
+    LrAnalyzer(const LalrTable& table, const std::queue<Token>& input)
         : m_t(table)
         , m_input(input)
-        , m_symbols(symbols)
         , m_tempVarsCounter(0)
     {
         m_states.push({ 0, Annotation{} });
@@ -564,8 +557,6 @@ std::queue<Token> Tokenize(std::string&& input)
     std::regex num("[0-9]+");
     std::regex keyword("record|int|float");
 
-    Type t{ "int", 8 };
-
     std::queue<Token> tokens;
     while (!input.empty())
     {
@@ -625,11 +616,10 @@ BOOST_AUTO_TEST_CASE(ArraysTest)
         "t9 = a [t8]\n"
         "x = t9\n";
 
-    SymbolTable symbolTable;
     std::queue<Token> tokens;
     tokens = Tokenize(std::move(input));
 
-    LrAnalyzer l{ table, tokens, symbolTable };
+    LrAnalyzer l{ table, tokens };
 
     const std::string threeAddressCode = l.Analyze().code.lines;
     std::cout << threeAddressCode << std::endl;
@@ -687,11 +677,10 @@ BOOST_AUTO_TEST_CASE(SmokeTest)
         "t24 = d [t23]\n"
         "t24 = 17\n";
 
-    SymbolTable symbolTable;
     std::queue<Token> tokens;
     tokens = Tokenize(std::move(input));
 
-    LrAnalyzer l{ table, tokens, symbolTable };
+    LrAnalyzer l{ table, tokens };
 
     const std::string threeAddressCode = l.Analyze().code.lines;
     std::cout << threeAddressCode << std::endl;
