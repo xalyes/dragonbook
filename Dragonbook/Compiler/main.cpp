@@ -1,3 +1,6 @@
+#define BOOST_TEST_MODULE compiler_tests tests
+#include <boost/test/included/unit_test.hpp>
+
 #include <string>
 #include <vector>
 #include <map>
@@ -13,8 +16,6 @@
 
 #include <boost/tokenizer.hpp>
 #include <boost/lexical_cast.hpp>
-//#include <Poco/StringTokenizer.h>
-//#include <Poco/NumberParser.h>
 
 using Type = std::pair<std::string, size_t>;
 using SymbolTable = std::map<std::string, Type>;
@@ -70,7 +71,7 @@ struct Code
 struct Array
 {
     std::string name;
-    std::vector<std::string> indexes;
+    std::deque<std::string> indexes;
     std::string lines;
 };
 
@@ -98,14 +99,29 @@ static std::string GenerateTempVar()
     return "t" + std::to_string(num++);
 }
 
-void ReduceHandler(const Reduce& reduce, std::vector<AnnotatedState>&& oldStates, SymbolTable& symbols, AnnotatedState& newState)
+static size_t GetSizeOf(const std::string& basicType)
 {
+    if (basicType == "int")
+        return 8;
+    else if (basicType == "float")
+        return 4;
+    else
+        throw std::invalid_argument("");
+}
+
+void ReduceHandler(const Reduce& reduce, std::vector<AnnotatedState>&& oldStates, SymbolTable& symbols, AnnotatedState& newState, size_t& tempVarsCounter)
+{
+    const auto generateTempVar = [&tempVarsCounter]()
+    {
+        return "t" + std::to_string(tempVarsCounter++);
+    };
+
     const auto binaryOp = [&](const std::string& opName)
     {
         const Code lhsCode = oldStates[0].second.code;
         const Code rhsCode = oldStates[2].second.code;
 
-        const std::string temp = GenerateTempVar();
+        const std::string temp = generateTempVar();
         symbols.insert({ temp, { "int", 8 } });
 
         newState.second.code.result = temp;
@@ -113,31 +129,31 @@ void ReduceHandler(const Reduce& reduce, std::vector<AnnotatedState>&& oldStates
             + temp + " = " + lhsCode.result + " " + opName + " " + rhsCode.result + "\n";
     };
 
-    const auto parseArray = [&symbols](const Array& arr)
+    const auto parseArray = [&symbols, &generateTempVar](const Array& arr)
     {
         std::string arrTypeName = arr.name;
         std::string newCode;
         std::queue<std::string> vars;
 
-        std::vector<std::string> indexes = arr.indexes;
+        std::deque<std::string> indexes = arr.indexes;
         std::reverse(indexes.begin(), indexes.end());
         
-        for (const auto& idx : indexes)
+        for (auto it = indexes.rbegin(); it != indexes.rend(); ++it)
         {
+            arrTypeName += "[]";
             const auto varSize = symbols.at(arrTypeName).second;
 
-            const std::string offset = GenerateTempVar();
+            const std::string offset = generateTempVar();
             symbols.insert({ offset, { "size_t", 64 } });
 
-            newCode += (offset + " = " + idx + " * " + std::to_string(varSize) + "\n");
+            newCode += (offset + " = " + *it + " * " + std::to_string(varSize) + "\n");
             vars.push(offset);
-            arrTypeName += "[]";
         }
 
         std::string newResult;
         if (vars.size() > 1)
         {
-            const std::string temp = GenerateTempVar();
+            const std::string temp = generateTempVar();
             const auto t1 = vars.front();
             vars.pop();
             const auto t2 = vars.front();
@@ -151,7 +167,7 @@ void ReduceHandler(const Reduce& reduce, std::vector<AnnotatedState>&& oldStates
 
             while (!vars.empty())
             {
-                const std::string nextTemp = GenerateTempVar();
+                const std::string nextTemp = generateTempVar();
                 symbols.insert({ nextTemp, { "size_t", 64 } });
 
                 newCode += (nextTemp + " = " + newResult + " + " + vars.front() + "\n");
@@ -164,16 +180,29 @@ void ReduceHandler(const Reduce& reduce, std::vector<AnnotatedState>&& oldStates
             newResult = vars.front();
         }
 
-
-        const std::string temp = GenerateTempVar();
+        const std::string temp = generateTempVar();
         symbols.insert({ temp, symbols.at(arrTypeName) });
 
         return std::pair<std::string, std::string>{ temp, arr.lines + newCode
             + temp + " = " + arr.name + " [" + newResult + "]\n" };
     };
 
-    // 0. S -> id = E ;
-    if (reduce.to == std::vector<GrammarSymbol>{ { false, "id" }, { false, "=" }, { true, "E" }, { false, ";" } })
+    // G' -> G
+    if (reduce.to == std::vector<GrammarSymbol>{ { true, "G" } })
+    {
+        newState.second.code = oldStates[0].second.code;
+    }
+    // G -> G Declarations Assign
+    else if (reduce.to == std::vector<GrammarSymbol>{ { true, "G" }, { true, "Declarations" }, { true, "Assign" } })
+    {
+        const Code lhsCode = oldStates[0].second.code;
+        const Code rhsCode = oldStates[2].second.code;
+
+        newState.second.code.lines = lhsCode.lines + rhsCode.lines;
+    }
+    // G -> 
+    // Assign -> id = Expr ;
+    else if (reduce.to == std::vector<GrammarSymbol>{ { false, "id" }, { false, "=" }, { true, "Expr" }, { false, ";" } })
     {
         const auto varName = oldStates[0].second.token.second;
         const Code oldCode = oldStates[2].second.code;
@@ -182,48 +211,8 @@ void ReduceHandler(const Reduce& reduce, std::vector<AnnotatedState>&& oldStates
         newState.second.code.lines = oldCode.lines
             + varName + " = " + oldCode.result + "\n";
     }
-    // 1. E -> E * E
-    if (reduce.to == std::vector<GrammarSymbol>{ { true, "E" }, { false, "*" }, { true, "E" } })
-    {
-        binaryOp("*");
-    }
-    // 2. E -> E / E
-    if (reduce.to == std::vector<GrammarSymbol>{ { true, "E" }, { false, "/" }, { true, "E" } })
-    {
-        binaryOp("/");
-    }
-    // 3. E -> E + E
-    if (reduce.to == std::vector<GrammarSymbol>{ { true, "E" }, { false, "+" }, { true, "E" } })
-    {
-        binaryOp("+");
-    }
-    // 4. E -> E - E
-    if (reduce.to == std::vector<GrammarSymbol>{ { true, "E" }, { false, "-" }, { true, "E" } })
-    {
-        binaryOp("-");
-    }
-    // 5. E -> - E
-    if (reduce.to == std::vector<GrammarSymbol>{ { false, "-" }, { true, "E" } })
-    {
-        const Code oldCode = oldStates[1].second.code;
-
-        const std::string temp = GenerateTempVar();
-        symbols.insert({ temp, { "int", 8 } });
-        newState.second.code.lines = oldCode.lines + temp + " = 0 - " + oldCode.result + "\n";
-        newState.second.code.result = temp;
-    }
-    // 6. E -> ( E )
-    if (reduce.to == std::vector<GrammarSymbol>{ { false, "(" }, { true, "E" } , { false, ")" } })
-    {
-        newState.second.code = oldStates[1].second.code;
-    }
-    // 7. E -> id
-    if (reduce.to == std::vector<GrammarSymbol>{ { false, "id" } })
-    {
-        newState.second.code.result = oldStates[0].second.token.second;
-    }
-    // 8. S -> L = E ;
-    if (reduce.to == std::vector<GrammarSymbol>{ { true, "L" }, { false, "=" }, { true, "E" }, { false, ";" } })
+    // Assign -> Array = Expr ;
+    else if (reduce.to == std::vector<GrammarSymbol>{ { true, "Array" }, { false, "=" }, { true, "Expr" }, { false, ";" } })
     {
         const auto arr = parseArray(oldStates[0].second.arr);
 
@@ -233,15 +222,61 @@ void ReduceHandler(const Reduce& reduce, std::vector<AnnotatedState>&& oldStates
         newState.second.code.lines = oldCode.lines + arr.second
             + arr.first + " = " + oldCode.result + "\n";
     }
-    // 9. E -> L
-    if (reduce.to == std::vector<GrammarSymbol>{ { true, "L" } })
+    // Assign ->
+    // Expr -> Expr * Expr
+    else if (reduce.to == std::vector<GrammarSymbol>{ { true, "Expr" }, { false, "*" }, { true, "Expr" } })
+    {
+        binaryOp("*");
+    }
+    // Expr -> Expr / Expr
+    else if (reduce.to == std::vector<GrammarSymbol>{ { true, "Expr" }, { false, "/" }, { true, "Expr" } })
+    {
+        binaryOp("/");
+    }
+    // Expr -> Expr + Expr
+    else if (reduce.to == std::vector<GrammarSymbol>{ { true, "Expr" }, { false, "+" }, { true, "Expr" } })
+    {
+        binaryOp("+");
+    }
+    // Expr -> Expr - Expr
+    else if (reduce.to == std::vector<GrammarSymbol>{ { true, "Expr" }, { false, "-" }, { true, "Expr" } })
+    {
+        binaryOp("-");
+    }
+    // Expr -> - Expr
+    else if (reduce.to == std::vector<GrammarSymbol>{ { false, "-" }, { true, "Expr" } })
+    {
+        const Code oldCode = oldStates[1].second.code;
+
+        const std::string temp = generateTempVar();
+        symbols.insert({ temp, { "int", 8 } });
+        newState.second.code.lines = oldCode.lines + temp + " = 0 - " + oldCode.result + "\n";
+        newState.second.code.result = temp;
+    }
+    // Expr -> ( Expr )
+    else if (reduce.to == std::vector<GrammarSymbol>{ { false, "(" }, { true, "Expr" } , { false, ")" } })
+    {
+        newState.second.code = oldStates[1].second.code;
+    }
+    // Expr -> id
+    else if (reduce.to == std::vector<GrammarSymbol>{ { false, "id" } })
+    {
+        newState.second.code.result = oldStates[0].second.token.second;
+    }
+    // Expr -> Array
+    else if (reduce.to == std::vector<GrammarSymbol>{ { true, "Array" } })
     {
         const auto res = parseArray(oldStates[0].second.arr);
         newState.second.code.result = res.first;
         newState.second.code.lines = res.second;
     }
-    // 10. L -> id [ E ]
-    if (reduce.to == std::vector<GrammarSymbol>{ { false, "id" }, { false, "[" }, { true, "E" }, { false, "]" } })
+    // Expr -> num
+    else if (reduce.to == std::vector<GrammarSymbol>{ { false, "num" } })
+    {
+        newState.second.code.result = oldStates[0].second.token.second;
+    }
+    // Array -> id [ Expr ]
+    else if (reduce.to == std::vector<GrammarSymbol>{ { false, "id" }, { false, "[" }, { true, "Expr" }, { false, "]" } })
     {
         const Code oldCode = oldStates[2].second.code;
         const auto varName = oldStates[0].second.token.second;
@@ -250,8 +285,8 @@ void ReduceHandler(const Reduce& reduce, std::vector<AnnotatedState>&& oldStates
         newState.second.arr.lines = oldCode.lines;
         newState.second.arr.indexes.push_back(oldCode.result);
     }
-    // 11. L->L[E]
-    if (reduce.to == std::vector<GrammarSymbol>{ { true, "L" }, { false, "[" }, { true, "E" }, { false, "]" } })
+    // Array -> Array [ Expr ]
+    else if (reduce.to == std::vector<GrammarSymbol>{ { true, "Array" }, { false, "[" }, { true, "Expr" }, { false, "]" } })
     {
         const Code oldCode = oldStates[2].second.code;
         const auto arr = oldStates[0].second.arr;
@@ -261,6 +296,58 @@ void ReduceHandler(const Reduce& reduce, std::vector<AnnotatedState>&& oldStates
         newState.second.arr.indexes = arr.indexes;
         newState.second.arr.indexes.push_back(oldCode.result);
     }
+    // Declarations -> Type id ; Declarations
+    else if (reduce.to == std::vector<GrammarSymbol>{ { true, "Type" }, { false, "id" }, { false, ";" }, { true, "Declarations" } })
+    {
+        auto varName = oldStates[1].second.token.second;
+        Array type = oldStates[0].second.arr;
+
+        for (size_t i = 0; i < type.indexes.size(); ++i)
+            varName += "[]";
+
+        auto typeName = type.name;
+        auto size = GetSizeOf(type.name);
+
+        symbols.try_emplace(varName, typeName, size);
+
+        //type.indexes.pop_front();
+
+        for (auto it = type.indexes.rbegin(); it != type.indexes.rend(); ++it)
+        {
+            size *= boost::lexical_cast<size_t>(*it);
+            varName.pop_back(); // pop ]
+            varName.pop_back(); // pop [
+            typeName += "[]";
+
+            symbols.try_emplace(varName, typeName, size);
+        }
+    }
+    // Declarations ->
+    // Type -> BasicType IndexesOptional
+    else if (reduce.to == std::vector<GrammarSymbol>{ { true, "BasicType" }, { true, "IndexesOptional" } })
+    {
+        newState.second.arr.name = oldStates[0].second.arr.name;
+        newState.second.arr.indexes = oldStates[1].second.arr.indexes;
+    }
+    // Type -> record { Declarations }
+    // BasicType -> int
+    else if (reduce.to == std::vector<GrammarSymbol>{ { false, "int" } })
+    {
+        newState.second.arr.name = "int";
+    }
+    // BasicType -> float
+    else if (reduce.to == std::vector<GrammarSymbol>{ { false, "float" } })
+    {
+        newState.second.arr.name = "float";
+    }
+    /// IndexesOptional ->[ num ] IndexesOptional
+    else if (reduce.to == std::vector<GrammarSymbol>{ { false, "[" }, { false, "num" }, { false, "]" }, { true, "IndexesOptional" } })
+    {
+        auto indexes = oldStates[3].second.arr.indexes;
+        indexes.push_front(oldStates[1].second.token.second);
+        newState.second.arr.indexes = indexes;
+    }
+    // IndexesOptional ->
 }
 
 class LrAnalyzer
@@ -270,6 +357,7 @@ public:
         : m_t(table)
         , m_input(input)
         , m_symbols(symbols)
+        , m_tempVarsCounter(0)
     {
         m_states.push({ 0, Annotation{} });
         m_input.push(Token{});
@@ -312,7 +400,7 @@ public:
 
                         const auto shift = std::get<Shift>(gotoIt->second);
                         m_states.push({ shift.st, Annotation{} });
-                        ReduceHandler(arg, std::move(states), m_symbols, m_states.top());
+                        ReduceHandler(arg, std::move(states), m_symbols, m_states.top(), m_tempVarsCounter);
                     }
                     else if constexpr (std::is_same_v<T, Accept>)
                     {
@@ -336,6 +424,7 @@ private:
     std::queue<Token> m_input;
     std::stack<AnnotatedState> m_states;
     SymbolTable m_symbols;
+    size_t m_tempVarsCounter;
 };
 
 LalrTable ParseGrammarFile()
@@ -349,7 +438,6 @@ LalrTable ParseGrammarFile()
     {
         boost::char_separator<char> sep{","};
         boost::tokenizer<decltype(sep)> tokenizer(header, sep);
-        //Poco::StringTokenizer tokenizer(header, ",", 1);
 
         bool terms = true;
         for (const auto& token : tokenizer)
@@ -381,7 +469,6 @@ LalrTable ParseGrammarFile()
         {
             boost::char_separator<char> sep{" "};
             boost::tokenizer<decltype(sep)> tokenizer(line, sep);
-            //Poco::StringTokenizer tokenizer(line, " ", 1);
 
             Reduce r;
             for (const auto& token : tokenizer)
@@ -469,11 +556,13 @@ LalrTable ParseGrammarFile()
     return table;
 }
 
-std::queue<Token> Tokenize(SymbolTable& symbolTable, std::string&& input)
+std::queue<Token> Tokenize(std::string&& input)
 {
     std::regex id("[a-zA-Z0-9]+");
     std::regex op(R"(\[|\]|=|;|\+|-|\*|\/|\(|\))");
     std::regex empty("[ \t]+");
+    std::regex num("[0-9]+");
+    std::regex keyword("record|int|float");
 
     Type t{ "int", 8 };
 
@@ -481,9 +570,16 @@ std::queue<Token> Tokenize(SymbolTable& symbolTable, std::string&& input)
     while (!input.empty())
     {
         std::smatch match;
-        if (std::regex_search(input, match, id, std::regex_constants::match_continuous))
+        if (std::regex_search(input, match, keyword, std::regex_constants::match_continuous))
         {
-            symbolTable.insert({ match.str(), t });
+            tokens.push({ match.str(), "" });
+        }
+        else if (std::regex_search(input, match, num, std::regex_constants::match_continuous))
+        {
+            tokens.push({ "num", match.str() });
+        }
+        else if (std::regex_search(input, match, id, std::regex_constants::match_continuous))
+        {
             tokens.push({ "id", match.str() });
         }
         else if (std::regex_search(input, match, op, std::regex_constants::match_continuous))
@@ -505,41 +601,100 @@ std::queue<Token> Tokenize(SymbolTable& symbolTable, std::string&& input)
     return tokens;
 }
 
-int main()
+BOOST_AUTO_TEST_CASE(ArraysTest)
 {
     LalrTable table = ParseGrammarFile();
 
-    std::string input;
+    std::string input =
+        "int[5][4] a;"
+        "int[5][4] b;"
+        "int[5] c;"
+        "x = a[b[i][j]][c[k]];"
+    ;
 
-    std::getline(std::cin, input);
+    const std::string expectedCode =
+        "t0 = i * 32\n"
+        "t1 = j * 8\n"
+        "t2 = t0 + t1\n"
+        "t3 = b [t2]\n"
+        "t4 = k * 8\n"
+        "t5 = c [t4]\n"
+        "t6 = t3 * 32\n"
+        "t7 = t5 * 8\n"
+        "t8 = t6 + t7\n"
+        "t9 = a [t8]\n"
+        "x = t9\n";
 
     SymbolTable symbolTable;
     std::queue<Token> tokens;
-    try
-    {
-        tokens = Tokenize(symbolTable, std::move(input));
-    }
-    catch (const std::exception& e)
-    {
-        std::cout << e.what() << std::endl;
-        return 1;
-    }
-
-    symbolTable.insert({ "arr", {"int[]", 3 * 3 * 8} });
-    symbolTable.insert({ "arr[]", {"int[]", 3 * 8} });
-    symbolTable.insert({ "arr[][]", {"int[]", 8} });
+    tokens = Tokenize(std::move(input));
 
     LrAnalyzer l{ table, tokens, symbolTable };
 
-    try
-    {
-        std::cout << l.Analyze().code.lines;
-    }
-    catch (const std::exception& e)
-    {
-        std::cout << e.what() << std::endl;
-        return 2;
-    }
+    const std::string threeAddressCode = l.Analyze().code.lines;
+    std::cout << threeAddressCode << std::endl;
 
-    return 0;
+    BOOST_TEST(threeAddressCode.c_str() == expectedCode.c_str());
+}
+
+BOOST_AUTO_TEST_CASE(SmokeTest)
+{
+    LalrTable table = ParseGrammarFile();
+
+    std::string input =
+        "int a;"
+        "a = 1 + 1 * 2;"
+        "int[3][2] b;"
+        "b[0][1] = 3;"
+        "b[1][0] = 5;"
+        "b[2][1] = 7;"
+        "int c;"
+        "c = b[0][0] + a;"
+        "int[4][3][2] d;"
+        "d[3][1][0] = 17;"
+    ;
+
+    const std::string expectedCode =
+        "t0 = 1 * 2\n"
+        "t1 = 1 + t0\n"
+        "a = t1\n"
+        "t2 = 0 * 16\n"
+        "t3 = 1 * 8\n"
+        "t4 = t2 + t3\n"
+        "t5 = b [t4]\n"
+        "t5 = 3\n"
+        "t6 = 1 * 16\n"
+        "t7 = 0 * 8\n"
+        "t8 = t6 + t7\n"
+        "t9 = b [t8]\n"
+        "t9 = 5\n"
+        "t10 = 2 * 16\n"
+        "t11 = 1 * 8\n"
+        "t12 = t10 + t11\n"
+        "t13 = b [t12]\n"
+        "t13 = 7\n"
+        "t14 = 0 * 16\n"
+        "t15 = 0 * 8\n"
+        "t16 = t14 + t15\n"
+        "t17 = b [t16]\n"
+        "t18 = t17 + a\n"
+        "c = t18\n"
+        "t19 = 3 * 48\n"
+        "t20 = 1 * 16\n"
+        "t21 = 0 * 8\n"
+        "t22 = t19 + t20\n"
+        "t23 = t22 + t21\n"
+        "t24 = d [t23]\n"
+        "t24 = 17\n";
+
+    SymbolTable symbolTable;
+    std::queue<Token> tokens;
+    tokens = Tokenize(std::move(input));
+
+    LrAnalyzer l{ table, tokens, symbolTable };
+
+    const std::string threeAddressCode = l.Analyze().code.lines;
+    std::cout << threeAddressCode << std::endl;
+
+    BOOST_TEST(threeAddressCode.c_str() == expectedCode.c_str());
 }

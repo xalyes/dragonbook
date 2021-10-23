@@ -6,8 +6,18 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-FIND_PACKAGE( Boost 1.74 COMPONENTS program_options REQUIRED )
-INCLUDE_DIRECTORIES( ${Boost_INCLUDE_DIR} )
+set (Boost_USE_STATIC_LIBS ON)
+set (Boost_USE_MULTITHREADED ON)
+set (Boost_USE_STATIC_RUNTIME OFF)
+
+if (WIN32)
+    set (Boost_INCLUDE_DIR "C:\\boost_1_76_0")
+    set (Boost_LIBRARY_DIR "C:\\boost_1_76_0\\stage\\lib")
+endif ()
+
+find_package(Boost COMPONENTS thread REQUIRED)
+include_directories(${Boost_INCLUDE_DIRS} include)
+link_directories(${Boost_LIBRARY_DIR})
 
 add_executable(compiler main.cpp)
 
