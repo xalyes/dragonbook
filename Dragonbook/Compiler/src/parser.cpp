@@ -43,7 +43,7 @@ void ReduceHandler(const Reduce& reduce, std::vector<AnnotatedState>&& oldStates
             + temp + " = " + lhsCode.result + " " + opName + " " + rhsCode.result + "\n";
     };
 
-    const auto parseArray = [&symbols, &generateTempVar](const Array& arr)
+    const auto parseArray = [&symbols, &generateTempVar](const Array& arr, bool rValue)
     {
         std::string arrTypeName = arr.name;
         std::string newCode;
@@ -101,8 +101,16 @@ void ReduceHandler(const Reduce& reduce, std::vector<AnnotatedState>&& oldStates
         const std::string temp = generateTempVar();
         symbols.insert({ temp, symbols.at(arrTypeName) });
 
-        return std::pair<std::string, std::string>{ temp, arr.lines + newCode
-            + temp + " = " + arr.name + " [" + newResult + "]\n" };
+        if (rValue)
+        {
+            return std::pair<std::string, std::string>{ temp, arr.lines + newCode
+                + temp + " = " + arr.name + "[" + newResult + "]\n" };
+        }
+        else
+        {
+            return std::pair<std::string, std::string>{ temp, arr.lines + newCode
+                + temp + " = " + arr.name + " + " + newResult + "\n" };
+        }
     };
 
     // G' -> G
@@ -133,13 +141,13 @@ void ReduceHandler(const Reduce& reduce, std::vector<AnnotatedState>&& oldStates
     // Assign -> Array = Expr ;
     else if (reduce.to == std::vector<GrammarSymbol>{ { true, "Array" }, { false, "=" }, { true, "Expr" }, { false, ";" } })
     {
-        const auto arr = parseArray(oldStates[0].second.arr);
+        const auto arr = parseArray(oldStates[0].second.arr, false);
 
         const Code oldCode = oldStates[2].second.code;
 
-        newState.second.code.result = arr.first;
+        newState.second.code.result = "*" + arr.first;
         newState.second.code.lines = oldCode.lines + arr.second
-            + arr.first + " = " + oldCode.result + "\n";
+            + "*" + arr.first + " = " + oldCode.result + "\n";
     }
     // Assign ->
     // Expr -> Expr * Expr
@@ -189,7 +197,7 @@ void ReduceHandler(const Reduce& reduce, std::vector<AnnotatedState>&& oldStates
     // Expr -> Array
     else if (reduce.to == std::vector<GrammarSymbol>{ { true, "Array" } })
     {
-        const auto res = parseArray(oldStates[0].second.arr);
+        const auto res = parseArray(oldStates[0].second.arr, true);
         newState.second.code.result = res.first;
         newState.second.code.lines = res.second;
     }
