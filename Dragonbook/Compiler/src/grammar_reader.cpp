@@ -58,7 +58,7 @@ LalrTable ParseGrammarFile(const std::filesystem::path& grammarFile)
                     continue;
                 }
 
-                if (token == "->")
+                if (token == "->" || token == "''")
                     continue;
 
                 const auto it = std::find_if(termsAndNonTerms.begin(), termsAndNonTerms.end(),

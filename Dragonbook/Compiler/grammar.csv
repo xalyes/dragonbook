@@ -2,10 +2,10 @@ id,=,;,*,/,+,-,(,),num,[,],int,float,$,G',G,Assign,Expr,Array,Declarations,Decla
 
 G' -> G
 G -> G Declarations Assign
-G -> 
+G -> ''
 Assign -> id = Expr ;
 Assign -> Array = Expr ;
-Assign -> 
+Assign -> ''
 Expr -> Expr * Expr
 Expr -> Expr / Expr
 Expr -> Expr + Expr
@@ -19,12 +19,12 @@ Array -> id [ Expr ]
 Array -> Array [ Expr ]
 Declarations -> Declaration ; Declarations
 Declarations -> Declaration = Expr ; Declarations
-Declarations -> 
+Declarations -> ''
 Declaration -> BasicType IndexesOptional id
 BasicType -> int
 BasicType -> float
 IndexesOptional -> [ num ] IndexesOptional
-IndexesOptional -> 
+IndexesOptional -> ''
 
 0,r2,,,,,,,,,,,,r2,r2,r2,,1,,,,,,,
 1,r19,,,,,,,,,,,,s5,s6,acc,,,,,,2,3,4,
