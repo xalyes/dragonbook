@@ -19,6 +19,17 @@ find_package(Boost COMPONENTS thread REQUIRED)
 include_directories(${Boost_INCLUDE_DIRS} include)
 link_directories(${Boost_LIBRARY_DIR})
 
-add_executable(compiler main.cpp)
+set (SRC
+    test/main.cpp
+    src/parser.cpp
+    src/grammar_reader.cpp
+    src/tokenizer.cpp
+    src/compiler.cpp
+    src/tokenizer.h
+    src/parser.h
+    src/grammar_reader.h
+)
 
-TARGET_LINK_LIBRARIES( compiler LINK_PUBLIC ${Boost_LIBRARIES} )
+add_executable(compiler ${SRC})
+
+TARGET_LINK_LIBRARIES(compiler LINK_PUBLIC ${Boost_LIBRARIES} )
