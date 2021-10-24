@@ -55,6 +55,10 @@ void ReduceHandler(const Reduce& reduce, std::vector<AnnotatedState>&& oldStates
         for (auto it = indexes.rbegin(); it != indexes.rend(); ++it)
         {
             arrTypeName += "[]";
+            const auto symbol = symbols.find(arrTypeName);
+            if (symbol == symbols.end())
+                throw std::runtime_error("Undefined symbol '" + arrTypeName + "'");
+
             const auto varSize = symbols.at(arrTypeName).second;
 
             const std::string offset = generateTempVar();
@@ -175,7 +179,11 @@ void ReduceHandler(const Reduce& reduce, std::vector<AnnotatedState>&& oldStates
     // Expr -> id
     else if (reduce.to == std::vector<GrammarSymbol>{ { false, "id" } })
     {
-        newState.second.code.result = oldStates[0].second.token.second;
+        const auto varName = oldStates[0].second.token.second;
+        if (symbols.find(varName) == symbols.end())
+            throw std::runtime_error("Undefined symbol '" + varName + "'");
+
+        newState.second.code.result = varName;
     }
     // Expr -> Array
     else if (reduce.to == std::vector<GrammarSymbol>{ { true, "Array" } })

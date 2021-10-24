@@ -6,6 +6,9 @@
 BOOST_AUTO_TEST_CASE(ArraysTest)
 {
     std::string input =
+        "int i;"
+        "int j;"
+        "int k;"
         "int[5][4] a;"
         "int[5][4] b;"
         "int[5] c;"
