@@ -6,9 +6,9 @@
 BOOST_AUTO_TEST_CASE(ArraysTest)
 {
     std::string input =
-        "int i;"
-        "int j;"
-        "int k;"
+        "int i = 0;"
+        "int j = 0;"
+        "int k = 0;"
         "int[5][4] a;"
         "int[5][4] b;"
         "int[5] c;"
@@ -16,6 +16,9 @@ BOOST_AUTO_TEST_CASE(ArraysTest)
     ;
 
     const std::string expectedCode =
+        "i = 0\n"
+        "j = 0\n"
+        "k = 0\n"
         "t0 = i * 32\n"
         "t1 = j * 8\n"
         "t2 = t0 + t1\n"
@@ -37,8 +40,7 @@ BOOST_AUTO_TEST_CASE(ArraysTest)
 BOOST_AUTO_TEST_CASE(SmokeTest)
 {
     std::string input =
-        "int a;"
-        "a = 1 + 1 * 2;"
+        "int a = 1 + 1 * 2;"
         "int[3][2] b;"
         "b[0][1] = 3;"
         "b[1][0] = 5;"

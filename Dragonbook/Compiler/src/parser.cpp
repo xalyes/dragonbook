@@ -113,10 +113,11 @@ void ReduceHandler(const Reduce& reduce, std::vector<AnnotatedState>&& oldStates
     // G -> G Declarations Assign
     else if (reduce.to == std::vector<GrammarSymbol>{ { true, "G" }, { true, "Declarations" }, { true, "Assign" } })
     {
-        const Code lhsCode = oldStates[0].second.code;
-        const Code rhsCode = oldStates[2].second.code;
+        const Code gCode  = oldStates[0].second.code;
+        const Code declCode = oldStates[1].second.code;
+        const Code assignCode  = oldStates[2].second.code;
 
-        newState.second.code.lines = lhsCode.lines + rhsCode.lines;
+        newState.second.code.lines = gCode.lines + declCode.lines + assignCode.lines;
     }
     // G -> 
     // Assign -> id = Expr ;
@@ -218,17 +219,34 @@ void ReduceHandler(const Reduce& reduce, std::vector<AnnotatedState>&& oldStates
         newState.second.arr.indexes = arr.indexes;
         newState.second.arr.indexes.push_back(oldCode.result);
     }
-    // Declarations -> Type id ; Declarations
-    else if (reduce.to == std::vector<GrammarSymbol>{ { true, "Type" }, { false, "id" }, { false, ";" }, { true, "Declarations" } })
+    // Declarations -> Declaration ; Declarations
+    else if (reduce.to == std::vector<GrammarSymbol>{ { true, "Declaration" }, { false, ";" }, { true, "Declarations" } })
     {
-        auto varName = oldStates[1].second.token.second;
-        Array type = oldStates[0].second.arr;
+        newState.second.code.lines = oldStates[2].second.code.lines;
+    }
+    // Declarations -> Declaration = Expr ; Declarations
+    else if (reduce.to == std::vector<GrammarSymbol>{ { true, "Declaration" }, { false, "=" }, { true, "Expr" }, { false, ";" }, { true, "Declarations" } })
+    {
+        const auto varName = oldStates[0].second.arr.name;
+        const Code oldCode = oldStates[2].second.code;
+
+        newState.second.code.result = varName;
+        newState.second.code.lines = oldCode.lines
+            + varName + " = " + oldCode.result + "\n"
+            + oldStates[4].second.code.lines;
+    }
+    // Declarations ->
+    // Declaration -> BasicType IndexesOptional id
+    else if (reduce.to == std::vector<GrammarSymbol>{ { true, "BasicType" }, { true, "IndexesOptional" }, { false, "id" } })
+    {
+        auto varName = oldStates[2].second.token.second;
+        Array type = oldStates[1].second.arr;
 
         for (size_t i = 0; i < type.indexes.size(); ++i)
             varName += "[]";
 
-        auto typeName = type.name;
-        auto size = GetSizeOf(type.name);
+        auto typeName = oldStates[0].second.arr.name;
+        auto size = GetSizeOf(typeName);
 
         symbols.try_emplace(varName, typeName, size);
 
@@ -241,15 +259,9 @@ void ReduceHandler(const Reduce& reduce, std::vector<AnnotatedState>&& oldStates
 
             symbols.try_emplace(varName, typeName, size);
         }
+
+        newState.second.arr.name = varName;
     }
-    // Declarations ->
-    // Type -> BasicType IndexesOptional
-    else if (reduce.to == std::vector<GrammarSymbol>{ { true, "BasicType" }, { true, "IndexesOptional" } })
-    {
-        newState.second.arr.name = oldStates[0].second.arr.name;
-        newState.second.arr.indexes = oldStates[1].second.arr.indexes;
-    }
-    // Type -> record { Declarations }
     // BasicType -> int
     else if (reduce.to == std::vector<GrammarSymbol>{ { false, "int" } })
     {
